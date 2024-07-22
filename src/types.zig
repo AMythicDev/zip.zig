@@ -1,117 +1,9 @@
-const std = @import("std");
-const read = @import("read.zig");
 const spec = @import("spec.zig");
-
-const ReadError = read.ReadError;
-const Allocator = std.mem.Allocator;
-const testing = std.testing;
-const StreamSource = std.io.StreamSource;
-
-const MemberMap = std.StringArrayHashMap(ZipEntry);
-
-pub const ZipArchive = struct {
-    stream: *std.io.StreamSource,
-    member_count: u16,
-    comment: []const u8,
-    eocdr_offset: u32,
-    cd_offset: u32,
-    allocator: Allocator,
-    members: MemberMap,
-
-    const Self = @This();
-
-    fn findEocd(allocator: Allocator, reader: anytype) ReadError!headerSearchResult(spec.Eocd, u32) {
-        var buff: [4]u8 = undefined;
-        if (try reader.readAll(&buff) != 4) return ReadError.UnexpectedEOFBeforeEOCDR;
-
-        var bytes_scanned: u32 = 4;
-        var bytes_read: u32 = 4;
-        while (bytes_read > 0) {
-            if (std.mem.readInt(u32, &buff, .little) == spec.EOCD_SIGNATURE)
-                return .{ .header = try spec.Eocd.newFromReader(allocator, reader), .offset = bytes_scanned };
-
-            std.mem.copyForwards(u8, buff[0..], buff[1..]);
-            bytes_scanned += bytes_read;
-            bytes_read = @intCast(try reader.read(buff[3..]));
-        }
-
-        return ReadError.UnexpectedEOFBeforeEOCDR;
-    }
-
-    fn entryIndexFromCentralDirectory(allocator: Allocator, reader: anytype, offset: *u32) ReadError!ZipEntry {
-        var buff: [4]u8 = undefined;
-        if (try reader.readAll(&buff) != 4) return ReadError.UnexpectedEOFBeforeEOCDR;
-
-        if (std.mem.readInt(u32, &buff, .little) == spec.CDFH_SIGNATURE) {
-            const cd = try spec.Cdfh.newFromReader(allocator, reader);
-            const entry = ZipEntry.fromCentralDirectoryRecord(cd, offset.*);
-            std.debug.print("{any}", .{entry.is_dir});
-            offset.* += spec.SIGNATURE_LENGTH + spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
-            return entry;
-        }
-        return ReadError.NoCDHFSignatureAtOffset;
-    }
-
-    pub fn openFromPath(allocator: Allocator, path: []const u8) ReadError!Self {
-        var file = try std.fs.openFileAbsolute(path, .{ .mode = .read_only });
-        var stream = file.seekableStream();
-        return Self.openFromStreamSource(allocator, &stream);
-    }
-
-    pub fn openFromStreamSource(allocator: Allocator, stream: *StreamSource) ReadError!Self {
-        var mod_stream = stream;
-        var reader = std.io.bufferedReader(mod_stream.reader());
-        var r = reader.reader();
-        const eocd_search = try Self.findEocd(allocator, &r);
-        const eocd = eocd_search.header;
-
-        if (eocd.base.disk_number != 0 or eocd.base.cd_start_disk != 0 or eocd.base.cd_entries_disk != eocd.base.total_cd_entries) {
-            @panic("Multi volume arcives not supported for now");
-        }
-
-        try stream.seekTo(eocd.base.cd_offset);
-        var offset = eocd.base.cd_offset;
-        var members = MemberMap.init(allocator);
-        for (0..eocd.base.total_cd_entries) |_| {
-            const entry = try entryIndexFromCentralDirectory(allocator, reader.reader(), &offset);
-            try members.put(entry.path, entry);
-        }
-
-        return Self{
-            .stream = stream,
-            .member_count = eocd.base.total_cd_entries,
-            .comment = eocd.comment,
-            .cd_offset = eocd.base.cd_offset,
-            .eocdr_offset = eocd_search.offset,
-            .allocator = allocator,
-            .members = members,
-        };
-    }
-
-    pub fn close(self: *Self) void {
-        self.allocator.free(self.comment);
-
-        const members = self.members.values();
-
-        for (members) |v| {
-            self.allocator.free(v.path);
-            self.allocator.free(v.extra);
-            self.allocator.free(v.comment);
-        }
-        self.members.deinit();
-    }
-};
-
-fn headerSearchResult(comptime T: type, comptime U: type) type {
-    return struct {
-        header: T,
-        offset: U,
-    };
-}
+const std = @import("std");
 
 pub const ZipEntry = struct {
     path: []const u8,
-    modtime: i64,
+    modtime: DateTime,
     comp_size: u32,
     uncomp_size: u32,
     lfh_offset: u32,
@@ -126,7 +18,7 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    fn fromCentralDirectoryRecord(cd: spec.Cdfh, offset: u32) Self {
+    pub fn fromCentralDirectoryRecord(cd: spec.Cdfh, offset: u32) DataError!Self {
         return ZipEntry{
             .path = cd.name,
             .cd_offset = offset,
@@ -138,46 +30,65 @@ pub const ZipEntry = struct {
             .compression = undefined,
             .crc32 = undefined,
             .is_dir = cd.base.ext_attrs & IS_DIR != 0,
-            .modtime = undefined,
+            .modtime = try DateTime.fromDos(cd.base.mod_time, cd.base.mod_date),
         };
     }
 };
 
-test "Find EOCD" {
-    const file = @embedFile("build.zip");
-    const allocator = testing.allocator;
-    const fixedBufferStream = std.io.fixedBufferStream;
+pub const DataError = error{DateTimeRange};
 
-    const stream = @constCast(&.{ .const_buffer = fixedBufferStream(file) });
-    var archive = try ZipArchive.openFromStreamSource(allocator, stream);
-    archive.close();
-}
+pub const DateTime = struct {
+    second: u8,
+    minute: u8,
+    hour: u8,
+    day: u8,
+    month: u8,
+    year: u16,
 
-// test "Find CDHF" {
-//     const file = @embedFile("build.zip");
-//     const allocator = testing.allocator;
-//     const eocdr = try findEocdr(allocator, file);
-//     defer eocdr.deinit();
-//
-//     var cds = try parseAllCdfh(allocator, file, eocdr.cd_offset, eocdr.total_cd_entries);
-//     defer cds.deinit();
-//
-//     while (cds.next()) |i| {
-//         std.debug.print("{s}\n", .{i.name});
-//     }
-// }
-//
-// test "Find LFH" {
-//     const file = @embedFile("build.zip");
-//     const allocator = testing.allocator;
-//     const eocdr = try findEocdr(allocator, file);
-//     defer eocdr.deinit();
-//
-//     var cds = try parseAllCdfh(allocator, file, eocdr.cd_offset, eocdr.total_cd_entries);
-//     defer cds.deinit();
-//
-//     while (cds.next()) |i| {
-//         std.debug.print("{s}\n", .{i.name});
-//         std.debug.print("{d}\n", .{i.lfh_offset});
-//     }
-// }
+    fn fromDos(dos_time: u16, dos_date: u16) DataError!@This() {
+        var second = (dos_time & 0x1f) * 2;
+        const minute = (dos_time >> 5) & 0x3f;
+        const hour = (dos_time >> 11);
+        const day = (dos_date & 0x1f);
+        const month = ((dos_date >> 5) & 0xf) - 1;
+        const year = (dos_date >> 9) + 1980;
+
+        if (DateTime.checkValidDateTime(second, minute, hour, day, month, year)) {
+            // exFAT cannot handle leap seconds
+            second = @min(second, 58);
+            return DateTime{
+                .second = @intCast(second),
+                .minute = @intCast(minute),
+                .hour = @intCast(day),
+                .day = @intCast(day),
+                .month = @intCast(month),
+                .year = @intCast(year),
+            };
+        }
+
+        return DataError.DateTimeRange;
+    }
+
+    fn checkValidDateTime(second: u16, minute: u16, hour: u16, day: u16, month: u16, year: u16) bool {
+        if (1980 <= year and year <= 2107 and 1 <= month and month <= 12 and 1 <= day and day <= 31 and 1 <= hour and hour <= 23 and minute <= 59 and second <= 60) {
+            const max_days: u8 = switch (month) {
+                2 => b: {
+                    break :b if (DateTime.isLeapYear(year)) @as(u8, 29) else @as(u8, 28);
+                },
+                1, 3, 5, 7, 8, 10, 12 => 31,
+                4, 6, 9, 11 => 30,
+                else => unreachable,
+            };
+            if (day > max_days) {
+                return false;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    fn isLeapYear(year: u16) bool {
+        return ((year % 4 == 0) and ((year % 25 != 0) or (year % 16 == 0)));
+    }
+};

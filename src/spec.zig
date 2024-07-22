@@ -95,12 +95,6 @@ pub const Cdfh = struct {
 
         return Self{ .base = base.*, .name = name, .extra = extra, .comment = comment, .allocator = allocator };
     }
-
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.name);
-        self.allocator.free(self.extra);
-        self.allocator.free(self.comment);
-    }
 };
 
 //
