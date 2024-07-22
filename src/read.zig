@@ -15,7 +15,7 @@ pub const ReadError = error{
     UnexpectedEOFBeforeCDHF,
     NoCDHFSignatureAtOffset,
     OutOfMemory,
-} || std.fs.File.OpenError || std.io.StreamSource.ReadError;
+} || std.fs.File.OpenError || std.io.StreamSource.ReadError || std.io.StreamSource.SeekError;
 
 // fn findEocdr(allocator: Allocator, stream: []const u8) !Eocd {
 //     var back_offset: usize = 0;

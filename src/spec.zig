@@ -15,8 +15,7 @@ pub const CDFH_SIGNATURE = 0x02014b50;
 pub const LFH_SIGNATURE = 0x04034b50;
 pub const SIGNATURE_LENGTH = 4;
 
-// Layout of End of Central Directory Record (EOCD)
-pub const Eocd = struct {
+pub const EocdBase = packed struct {
     disk_number: u16,
     cd_start_disk: u16,
     cd_entries_disk: u16,
@@ -24,38 +23,34 @@ pub const Eocd = struct {
     cd_size: u32,
     cd_offset: u32,
     comment_len: u16,
+};
+
+// Layout of End of Central Directory Record (EOCD)
+pub const Eocd = struct {
+    base: EocdBase,
     comment: []const u8,
 
     allocator: Allocator,
 
     const Self = @This();
 
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.comment);
-    }
-
     pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
-        var buff: [EOCD_SIZE_NOV]u8 = undefined;
-        if (try reader.readAtLeast(&buff, EOCD_SIZE_NOV) == 0) return ReadError.UnexpectedEOFBeforeEOCDR;
-        var slice_ptr = buff[0..].ptr;
-        var eocd = Self{
-            .disk_number = read_bytes(u16, &slice_ptr),
-            .cd_start_disk = read_bytes(u16, &slice_ptr),
-            .cd_entries_disk = read_bytes(u16, &slice_ptr),
-            .total_cd_entries = read_bytes(u16, &slice_ptr),
-            .cd_size = read_bytes(u32, &slice_ptr),
-            .cd_offset = read_bytes(u32, &slice_ptr),
-            .comment_len = read_bytes(u16, &slice_ptr),
-            .comment = undefined,
+        var buff: [EOCD_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
+        if (try reader.readAtLeast(&buff, EOCD_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeEOCDR;
+        const base: *align(@alignOf(Eocd)) EocdBase = @alignCast(std.mem.bytesAsValue(EocdBase, &buff));
+        const comment = try allocator.alloc(u8, base.comment_len);
+        if (base.comment_len != 0)
+            if (try reader.readAtLeast(comment, base.comment_len) == 0) return ReadError.UnexpectedEOFBeforeEOCDR;
+
+        return Self{
+            .base = base.*,
+            .comment = comment,
             .allocator = allocator,
         };
-        eocd.comment = try allocator.dupe(u8, slice_ptr[0..eocd.comment_len]);
-        return eocd;
     }
 };
 
-// Layout of Central Directory File Header (CDFH)
-pub const Cdfh = struct {
+pub const CdfhBase = packed struct {
     made_by_ver: u16,
     extract_ver: u16,
     gp_flag: u16,
@@ -72,6 +67,11 @@ pub const Cdfh = struct {
     int_attrs: u16,
     ext_attrs: u32,
     lfh_offset: u32,
+};
+
+// Layout of Central Directory File Header (CDFH)
+pub const Cdfh = struct {
+    base: CdfhBase,
     name: []const u8,
     extra: []const u8,
     comment: []const u8,
@@ -80,34 +80,20 @@ pub const Cdfh = struct {
 
     const Self = @This();
 
-    pub fn newFromSlice(allocator: Allocator, slice: []const u8) ReadError!Self {
-        var slice_ptr: [*]u8 = @constCast(slice.ptr);
-        var cdfh = Self{
-            .made_by_ver = read_bytes(u16, &slice_ptr),
-            .extract_ver = read_bytes(u16, &slice_ptr),
-            .gp_flag = read_bytes(u16, &slice_ptr),
-            .compression = read_bytes(u16, &slice_ptr),
-            .mod_time = read_bytes(u16, &slice_ptr),
-            .mod_date = read_bytes(u16, &slice_ptr),
-            .crc32 = read_bytes(u32, &slice_ptr),
-            .comp_size = read_bytes(u32, &slice_ptr),
-            .uncomp_size = read_bytes(u32, &slice_ptr),
-            .name_len = read_bytes(u16, &slice_ptr),
-            .extra_len = read_bytes(u16, &slice_ptr),
-            .comment_len = read_bytes(u16, &slice_ptr),
-            .start_disk = read_bytes(u16, &slice_ptr),
-            .int_attrs = read_bytes(u16, &slice_ptr),
-            .ext_attrs = read_bytes(u32, &slice_ptr),
-            .lfh_offset = read_bytes(u32, &slice_ptr),
-            .allocator = allocator,
-            .name = undefined,
-            .extra = undefined,
-            .comment = undefined,
-        };
-        cdfh.name = try allocator.dupe(u8, slice_ptr[0..cdfh.name_len]);
-        cdfh.extra = try allocator.dupe(u8, slice_ptr[cdfh.name_len .. cdfh.name_len + cdfh.extra_len]);
-        cdfh.comment = try allocator.dupe(u8, slice_ptr[cdfh.name_len + cdfh.extra_len .. cdfh.name_len + cdfh.extra_len + cdfh.comment_len]);
-        return cdfh;
+    pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
+        var buff: [CDHF_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
+        if (try reader.readAtLeast(&buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeCDHF;
+        const base: *align(@alignOf(Cdfh)) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
+
+        const name = try allocator.alloc(u8, base.name_len);
+        const extra = try allocator.alloc(u8, base.extra_len);
+        const comment = try allocator.alloc(u8, base.comment_len);
+
+        _ = try reader.readAtLeast(name, base.name_len);
+        _ = try reader.readAtLeast(extra, base.extra_len);
+        _ = try reader.readAtLeast(comment, base.comment_len);
+
+        return Self{ .base = base.*, .name = name, .extra = extra, .comment = comment, .allocator = allocator };
     }
 
     pub fn deinit(self: Self) void {
@@ -117,85 +103,77 @@ pub const Cdfh = struct {
     }
 };
 
-pub fn HeaderIterator(comptime T: type) type {
-    return struct {
-        internal_buffer: std.ArrayList(T),
-        index: u16 = 0,
-
-        const Self = @This();
-
-        pub fn init(allocator: Allocator, entries: u16) error{OutOfMemory}!Self {
-            return Self{ .internal_buffer = try std.ArrayList(T).initCapacity(allocator, entries), .index = 0 };
-        }
-
-        pub fn insert(self: *Self, header: T) error{OutOfMemory}!void {
-            try self.internal_buffer.append(header);
-        }
-
-        pub fn next(self: *Self) ?T {
-            if (self.index >= self.internal_buffer.items.len) return null;
-            self.index += 1;
-            return self.internal_buffer.items[self.index - 1];
-        }
-
-        pub fn deinit(self: *Self) void {
-            for (self.internal_buffer.items) |header| {
-                header.deinit();
-            }
-            self.internal_buffer.deinit();
-            self.index = 0;
-        }
-    };
-}
-
-pub const Lfh = struct {
-    extract_ver: u16,
-    gp_flag: u16,
-    compression: u16,
-    mod_time: u16,
-    mod_date: u16,
-    crc32: u32,
-    comp_size: u32,
-    uncomp_size: u32,
-    name_len: u16,
-    extra_len: u16,
-    name: []const u8,
-    extra: []const u8,
-
-    allocator: Allocator,
-
-    const Self = @This();
-
-    pub fn newFromSlice(allocator: Allocator, slice: []const u8) ReadError!Self {
-        var slice_ptr: [*]u8 = @constCast(slice.ptr);
-        var cdfh = Self{
-            .extract_ver = read_bytes(u16, &slice_ptr),
-            .gp_flag = read_bytes(u16, &slice_ptr),
-            .compression = read_bytes(u16, &slice_ptr),
-            .mod_time = read_bytes(u16, &slice_ptr),
-            .mod_date = read_bytes(u16, &slice_ptr),
-            .crc32 = read_bytes(u32, &slice_ptr),
-            .comp_size = read_bytes(u32, &slice_ptr),
-            .uncomp_size = read_bytes(u32, &slice_ptr),
-            .name_len = read_bytes(u16, &slice_ptr),
-            .extra_len = read_bytes(u16, &slice_ptr),
-            .allocator = allocator,
-            .name = undefined,
-            .extra = undefined,
-        };
-        cdfh.name = try allocator.dupe(u8, slice_ptr[0..cdfh.name_len]);
-        cdfh.extra = try allocator.dupe(u8, slice_ptr[cdfh.name_len .. cdfh.name_len + cdfh.extra_len]);
-        return cdfh;
-    }
-
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.name);
-        self.allocator.free(self.extra);
-    }
-};
-
-inline fn read_bytes(comptime T: type, p: *[*]u8) T {
-    const bytes = @divExact(@typeInfo(T).Int.bits, 8);
-    p.* += bytes;
-    return std.mem.readInt(T, @ptrCast(p.* - bytes), .little);
-}
+//
+// pub fn HeaderIterator(comptime T: type) type {
+//     return struct {
+//         internal_buffer: std.ArrayList(T),
+//         index: u16 = 0,
+//
+//         const Self = @This();
+//
+//         pub fn init(allocator: Allocator, entries: u16) error{OutOfMemory}!Self {
+//             return Self{ .internal_buffer = try std.ArrayList(T).initCapacity(allocator, entries), .index = 0 };
+//         }
+//
+//         pub fn insert(self: *Self, header: T) error{OutOfMemory}!void {
+//             try self.internal_buffer.append(header);
+//         }
+//
+//         pub fn next(self: *Self) ?T {
+//             if (self.index >= self.internal_buffer.items.len) return null;
+//             self.index += 1;
+//             return self.internal_buffer.items[self.index - 1];
+//         }
+//
+//         pub fn deinit(self: *Self) void {
+//             for (self.internal_buffer.items) |header| {
+//                 header.deinit();
+//             }
+//             self.internal_buffer.deinit();
+//             self.index = 0;
+//         }
+//     };
+// }
+//
+// pub const LfhBase = packed struct {
+//     extract_ver: u16,
+//     gp_flag: u16,
+//     compression: u16,
+//     mod_time: u16,
+//     mod_date: u16,
+//     crc32: u32,
+//     comp_size: u32,
+//     uncomp_size: u32,
+//     name_len: u16,
+//     extra_len: u16,
+// };
+//
+// pub const Lfh = struct {
+//     base: LfhBase,
+//     name: []const u8,
+//     extra: []const u8,
+//
+//     allocator: Allocator,
+//
+//     const Self = @This();
+//
+//     pub fn newFromSlice(allocator: Allocator, reader: anytype) ReadError!Self {
+//         var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
+//         if (try reader.readAtLeast(&buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeCDHF;
+//
+//         const base = std.mem.bytesAsValue(CdfhBase, buff);
+//
+//         var name = allocator.alloc(u8, base.name_len);
+//         var extra = allocator.alloc(u8, base.extra_len);
+//
+//         try reader.readAtLeast(&name, base.name_len);
+//         try reader.readAtLeast(&extra, base.extra_len);
+//
+//         return Self{ .base = base, .name = name, .extra = extra };
+//     }
+//
+//     pub fn deinit(self: Self) void {
+//         self.allocator.free(self.name);
+//         self.allocator.free(self.extra);
+//     }
+// };
