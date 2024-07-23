@@ -130,6 +130,13 @@ test "Find EOCD" {
 
     const stream = @constCast(&.{ .const_buffer = fixedBufferStream(file) });
     var archive = try ZipArchive.openFromStreamSource(allocator, stream);
+
+    var iter = archive.members.iterator();
+
+    while (iter.next()) |entry| {
+        std.debug.print("{s} {d} {any} {any}\n", .{ entry.key_ptr.*, entry.value_ptr.made_by_ver, entry.value_ptr.os, entry.value_ptr.compression });
+    }
+
     archive.close();
 }
 

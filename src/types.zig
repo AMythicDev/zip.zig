@@ -4,11 +4,16 @@ const std = @import("std");
 pub const ZipEntry = struct {
     path: []const u8,
     modtime: DateTime,
+    made_by_ver: u8,
+    os: OperatingSystem,
     comp_size: u32,
     uncomp_size: u32,
     lfh_offset: u32,
     cd_offset: u32,
-    compression: u16,
+    compression: Compression,
+    // Level of compression for deflate to be used when writing the file.
+    // 0 for normal, 1 for maximum, 2 for fast, 3 for super fast.
+    compression_level: ?i64,
     crc32: u32,
     comment: []const u8,
     extra: []const u8,
@@ -23,12 +28,15 @@ pub const ZipEntry = struct {
             .path = cd.name,
             .cd_offset = offset,
             .comment = cd.comment,
+            .os = OperatingSystem.detectOS(@intCast(cd.base.made_by_ver >> 8)),
+            .made_by_ver = @intCast(cd.base.made_by_ver & 0xff),
             .extra = cd.extra,
             .comp_size = cd.base.comp_size,
             .uncomp_size = cd.base.uncomp_size,
             .lfh_offset = cd.base.lfh_offset,
-            .compression = undefined,
-            .crc32 = undefined,
+            .compression = Compression.detectCompression(cd.base.compression),
+            .compression_level = null,
+            .crc32 = cd.base.crc32,
             .is_dir = cd.base.ext_attrs & IS_DIR != 0,
             .modtime = try DateTime.fromDos(cd.base.mod_time, cd.base.mod_date),
         };
@@ -90,5 +98,33 @@ pub const DateTime = struct {
 
     fn isLeapYear(year: u16) bool {
         return ((year % 4 == 0) and ((year % 25 != 0) or (year % 16 == 0)));
+    }
+};
+
+pub const OperatingSystem = enum(u8) {
+    Dos = 0,
+    Unix = 3,
+    Unknown,
+
+    fn detectOS(code: u8) OperatingSystem {
+        if (code == @intFromEnum(OperatingSystem.Dos))
+            return OperatingSystem.Dos
+        else if (code == @intFromEnum(OperatingSystem.Unix))
+            return OperatingSystem.Unix
+        else
+            return OperatingSystem.Unknown;
+    }
+};
+
+pub const Compression = enum(u16) {
+    Store = 0,
+    Deflate = 8,
+
+    fn detectCompression(val: u16) Compression {
+        return switch (val) {
+            @intFromEnum(Compression.Store) => Compression.Store,
+            @intFromEnum(Compression.Deflate) => Compression.Deflate,
+            else => @panic("Compression method not supported"),
+        };
     }
 };
