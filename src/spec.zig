@@ -1,7 +1,7 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const ReadError = @import("read.zig").ReadError;
+const ReadError = @import("read.zig").ArchiveParseError;
 
 // Sizes for various headers
 // The _NOV suffix indicates that these sizes don't account for the variable length data like file name, comment, extra attrs inside the record .
@@ -97,38 +97,6 @@ pub const Cdfh = struct {
     }
 };
 
-//
-// pub fn HeaderIterator(comptime T: type) type {
-//     return struct {
-//         internal_buffer: std.ArrayList(T),
-//         index: u16 = 0,
-//
-//         const Self = @This();
-//
-//         pub fn init(allocator: Allocator, entries: u16) error{OutOfMemory}!Self {
-//             return Self{ .internal_buffer = try std.ArrayList(T).initCapacity(allocator, entries), .index = 0 };
-//         }
-//
-//         pub fn insert(self: *Self, header: T) error{OutOfMemory}!void {
-//             try self.internal_buffer.append(header);
-//         }
-//
-//         pub fn next(self: *Self) ?T {
-//             if (self.index >= self.internal_buffer.items.len) return null;
-//             self.index += 1;
-//             return self.internal_buffer.items[self.index - 1];
-//         }
-//
-//         pub fn deinit(self: *Self) void {
-//             for (self.internal_buffer.items) |header| {
-//                 header.deinit();
-//             }
-//             self.internal_buffer.deinit();
-//             self.index = 0;
-//         }
-//     };
-// }
-//
 // pub const LfhBase = packed struct {
 //     extract_ver: u16,
 //     gp_flag: u16,

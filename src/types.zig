@@ -1,8 +1,9 @@
 const spec = @import("spec.zig");
 const std = @import("std");
+const ArchiveParseError = @import("read.zig").ArchiveParseError;
 
 pub const ZipEntry = struct {
-    path: []const u8,
+    name: []const u8,
     modtime: DateTime,
     made_by_ver: u8,
     os: OperatingSystem,
@@ -23,9 +24,9 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(cd: spec.Cdfh, offset: u32) DataError!Self {
+    pub fn fromCentralDirectoryRecord(cd: spec.Cdfh, offset: u32) ArchiveParseError!Self {
         return ZipEntry{
-            .path = cd.name,
+            .name = cd.name,
             .cd_offset = offset,
             .comment = cd.comment,
             .os = OperatingSystem.detectOS(@intCast(cd.base.made_by_ver >> 8)),
@@ -43,8 +44,6 @@ pub const ZipEntry = struct {
     }
 };
 
-pub const DataError = error{DateTimeRange};
-
 pub const DateTime = struct {
     second: u8,
     minute: u8,
@@ -53,7 +52,7 @@ pub const DateTime = struct {
     month: u8,
     year: u16,
 
-    fn fromDos(dos_time: u16, dos_date: u16) DataError!@This() {
+    fn fromDos(dos_time: u16, dos_date: u16) !@This() {
         var second = (dos_time & 0x1f) * 2;
         const minute = (dos_time >> 5) & 0x3f;
         const hour = (dos_time >> 11);
@@ -74,7 +73,7 @@ pub const DateTime = struct {
             };
         }
 
-        return DataError.DateTimeRange;
+        return ArchiveParseError.DateTimeRange;
     }
 
     fn checkValidDateTime(second: u16, minute: u16, hour: u16, day: u16, month: u16, year: u16) bool {
