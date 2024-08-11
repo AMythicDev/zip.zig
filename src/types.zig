@@ -57,7 +57,7 @@ pub const ZipEntry = struct {
 
         var bufreader = std.io.bufferedReader(self.stream.reader());
         const r = bufreader.reader();
-        var lim_reader = std.io.limitedReader(r, self.comp_size + 2);
+        var lim_reader = std.io.limitedReader(r, self.comp_size);
         return lim_reader.reader();
     }
 };
