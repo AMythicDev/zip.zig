@@ -1,8 +1,11 @@
 const spec = @import("spec.zig");
 const std = @import("std");
-const ArchiveParseError = @import("read.zig").ArchiveParseError;
+const read = @import("read.zig");
+const ArchiveParseError = read.ArchiveParseError;
+const StreamSource = std.io.StreamSource;
 
 pub const ZipEntry = struct {
+    stream: *StreamSource,
     name: []const u8,
     modtime: DateTime,
     made_by_ver: u8,
@@ -24,8 +27,9 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(cd: spec.Cdfh, offset: u32) ArchiveParseError!Self {
+    pub fn fromCentralDirectoryRecord(stream: *StreamSource, cd: spec.Cdfh, offset: u32) ArchiveParseError!Self {
         return ZipEntry{
+            .stream = stream,
             .name = cd.name,
             .cd_offset = offset,
             .comment = cd.comment,
@@ -42,6 +46,20 @@ pub const ZipEntry = struct {
             .modtime = try DateTime.fromDos(cd.base.mod_time, cd.base.mod_date),
         };
     }
+
+    pub fn reader(self: *Self) ArchiveParseError!std.io.LimitedReader(std.io.BufferedReader(4096, @TypeOf(self.stream.reader())).Reader).Reader {
+        try self.stream.seekTo(self.lfh_offset + spec.SIGNATURE_LENGTH);
+
+        var buff: [spec.LFH_SIZE_NOV - spec.SIGNATURE_LENGTH]u8 = undefined;
+        if (self.stream.reader().readAtLeast(&buff, spec.LFH_SIZE_NOV - spec.SIGNATURE_LENGTH) catch unreachable == 0) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+        const base: *align(@alignOf(spec.LfhBase)) spec.LfhBase = @alignCast(std.mem.bytesAsValue(spec.LfhBase, &buff));
+        try self.stream.seekBy(base.name_len + base.extra_len);
+
+        var bufreader = std.io.bufferedReader(self.stream.reader());
+        const r = bufreader.reader();
+        var lim_reader = std.io.limitedReader(r, self.comp_size + 2);
+        return lim_reader.reader();
+    }
 };
 
 pub const DateTime = struct {
@@ -52,7 +70,7 @@ pub const DateTime = struct {
     month: u8,
     year: u16,
 
-    fn fromDos(dos_time: u16, dos_date: u16) !@This() {
+    fn fromDos(dos_time: u16, dos_date: u16) error{DateTimeRange}!@This() {
         var second = (dos_time & 0x1f) * 2;
         const minute = (dos_time >> 5) & 0x3f;
         const hour = (dos_time >> 11);
@@ -73,7 +91,7 @@ pub const DateTime = struct {
             };
         }
 
-        return ArchiveParseError.DateTimeRange;
+        return error.DateTimeRange;
     }
 
     fn checkValidDateTime(second: u16, minute: u16, hour: u16, day: u16, month: u16, year: u16) bool {

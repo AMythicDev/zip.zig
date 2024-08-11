@@ -10,6 +10,7 @@ const Lfh = spec.Lfh;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
+const StreamSource = std.io.StreamSource;
 
 const MAX_BACK_OFFSET = 100 * 1024;
 
@@ -20,8 +21,6 @@ pub const ArchiveParseError = error{
     DateTimeRange,
     OutOfMemory,
 } || std.fs.File.OpenError || std.io.StreamSource.ReadError || std.io.StreamSource.SeekError;
-
-const StreamSource = std.io.StreamSource;
 
 const MemberMap = std.StringArrayHashMap(ZipEntry);
 
@@ -54,13 +53,14 @@ pub const ZipArchive = struct {
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
     }
 
-    fn entryIndexFromCentralDirectory(allocator: Allocator, reader: anytype, offset: *u32) ArchiveParseError!ZipEntry {
+    fn entryIndexFromCentralDirectory(allocator: Allocator, stream: *StreamSource, offset: *u32) ArchiveParseError!ZipEntry {
+        var reader = stream.reader();
         var buff: [4]u8 = undefined;
         if (try reader.readAll(&buff) != 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
         if (std.mem.readInt(u32, &buff, .little) == spec.CDFH_SIGNATURE) {
             const cd = try spec.Cdfh.newFromReader(allocator, reader);
-            const entry = try ZipEntry.fromCentralDirectoryRecord(cd, offset.*);
+            const entry = try ZipEntry.fromCentralDirectoryRecord(stream, cd, offset.*);
             offset.* += spec.SIGNATURE_LENGTH + spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
             return entry;
         }
@@ -74,8 +74,7 @@ pub const ZipArchive = struct {
     }
 
     pub fn openFromStreamSource(allocator: Allocator, stream: *StreamSource) ArchiveParseError!Self {
-        var mod_stream = stream;
-        var reader = std.io.bufferedReader(mod_stream.reader());
+        var reader = std.io.bufferedReader(stream.reader());
         var r = reader.reader();
         const eocd_search = try Self.findEocd(allocator, &r);
         const eocd = eocd_search.header;
@@ -88,7 +87,7 @@ pub const ZipArchive = struct {
         var offset = eocd.base.cd_offset;
         var members = MemberMap.init(allocator);
         for (0..eocd.base.total_cd_entries) |_| {
-            const entry = try entryIndexFromCentralDirectory(allocator, reader.reader(), &offset);
+            const entry = try entryIndexFromCentralDirectory(allocator, stream, &offset);
             try members.put(entry.name, entry);
         }
 
@@ -151,22 +150,34 @@ test "Parse EOCD" {
 
 pub usingnamespace if (builtin.is_test)
     struct {
-        pub fn loadZip(comptime path: []const u8) !ZipArchive {
+        pub fn loadZip(comptime path: []const u8) std.io.StreamSource {
             const file = @embedFile(path);
-            const allocator = testing.allocator;
             const fixedBufferStream = std.io.fixedBufferStream;
 
-            const stream = @constCast(&.{ .const_buffer = fixedBufferStream(file) });
-            const archive = try ZipArchive.openFromStreamSource(allocator, stream);
-            return archive;
+            const stream = .{ .const_buffer = fixedBufferStream(file) };
+            return stream;
         }
 
         test "Parse CDFH" {
-            var archive = try loadZip("build.zip");
+            var stream = loadZip("build.zip");
+            const allocator = testing.allocator;
+            var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
 
             try testing.expect(archive.getFileByIndex(0) != null);
             try testing.expectEqual(archive.getFileByIndex(1), null);
 
+            archive.close();
+        }
+
+        test "Read uncompressed data" {
+            var stream = loadZip("build.zip");
+            const allocator = testing.allocator;
+            var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
+            var file = archive.getFileByIndex(0).?;
+            var file_reader = try file.reader();
+            const conts = try file_reader.readAllAlloc(allocator, 10000);
+            std.debug.print("{x}", .{conts});
+            allocator.free(conts);
             archive.close();
         }
     };

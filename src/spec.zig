@@ -97,18 +97,19 @@ pub const Cdfh = struct {
     }
 };
 
-// pub const LfhBase = packed struct {
-//     extract_ver: u16,
-//     gp_flag: u16,
-//     compression: u16,
-//     mod_time: u16,
-//     mod_date: u16,
-//     crc32: u32,
-//     comp_size: u32,
-//     uncomp_size: u32,
-//     name_len: u16,
-//     extra_len: u16,
-// };
+pub const LfhBase = packed struct {
+    extract_ver: u16,
+    gp_flag: u16,
+    compression: u16,
+    mod_time: u16,
+    mod_date: u16,
+    crc32: u32,
+    comp_size: u32,
+    uncomp_size: u32,
+    name_len: u16,
+    extra_len: u16,
+};
+
 //
 // pub const Lfh = struct {
 //     base: LfhBase,
