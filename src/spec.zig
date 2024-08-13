@@ -110,33 +110,32 @@ pub const LfhBase = packed struct {
     extra_len: u16,
 };
 
-//
-// pub const Lfh = struct {
-//     base: LfhBase,
-//     name: []const u8,
-//     extra: []const u8,
-//
-//     allocator: Allocator,
-//
-//     const Self = @This();
-//
-//     pub fn newFromSlice(allocator: Allocator, reader: anytype) ReadError!Self {
-//         var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-//         if (try reader.readAtLeast(&buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeCDHF;
-//
-//         const base = std.mem.bytesAsValue(CdfhBase, buff);
-//
-//         var name = allocator.alloc(u8, base.name_len);
-//         var extra = allocator.alloc(u8, base.extra_len);
-//
-//         try reader.readAtLeast(&name, base.name_len);
-//         try reader.readAtLeast(&extra, base.extra_len);
-//
-//         return Self{ .base = base, .name = name, .extra = extra };
-//     }
-//
-//     pub fn deinit(self: Self) void {
-//         self.allocator.free(self.name);
-//         self.allocator.free(self.extra);
-//     }
-// };
+pub const Lfh = struct {
+    base: LfhBase,
+    name: []const u8,
+    extra: []const u8,
+
+    allocator: Allocator,
+
+    const Self = @This();
+
+    pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
+        var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
+        if (try reader.readAtLeast(&buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeLFH;
+
+        const base: *align(@alignOf(LfhBase)) LfhBase = @alignCast(std.mem.bytesAsValue(LfhBase, &buff));
+
+        const name = try allocator.alloc(u8, base.name_len);
+        const extra = try allocator.alloc(u8, base.extra_len);
+
+        _ = reader.readAtLeast(name, base.name_len) catch return ReadError.UnexpectedEOFBeforeLFH;
+        _ = reader.readAtLeast(extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeLFH;
+
+        return Self{ .base = base.*, .name = name, .extra = extra, .allocator = allocator };
+    }
+
+    pub fn deinit(self: Self) void {
+        self.allocator.free(self.name);
+        self.allocator.free(self.extra);
+    }
+};

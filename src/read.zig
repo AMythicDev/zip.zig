@@ -17,6 +17,7 @@ const MAX_BACK_OFFSET = 100 * 1024;
 pub const ArchiveParseError = error{
     UnexpectedEOFBeforeEOCDR,
     UnexpectedEOFBeforeCDHF,
+    UnexpectedEOFBeforeLFH,
     NoCDHFSignatureAtOffset,
     DateTimeRange,
     OutOfMemory,
@@ -60,7 +61,14 @@ pub const ZipArchive = struct {
 
         if (std.mem.readInt(u32, &buff, .little) == spec.CDFH_SIGNATURE) {
             const cd = try spec.Cdfh.newFromReader(allocator, reader);
-            const entry = try ZipEntry.fromCentralDirectoryRecord(stream, cd, offset.*);
+            try stream.seekTo(cd.base.lfh_offset + spec.SIGNATURE_LENGTH);
+
+            const lfh = try spec.Lfh.newFromReader(allocator, stream.reader());
+            defer allocator.free(cd.extra);
+            defer allocator.free(lfh.name);
+
+            const entry = try ZipEntry.fromCentralDirectoryRecord(stream, cd, lfh, offset.*);
+
             offset.* += spec.SIGNATURE_LENGTH + spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
             return entry;
         }
@@ -89,6 +97,7 @@ pub const ZipArchive = struct {
         for (0..eocd.base.total_cd_entries) |_| {
             const entry = try entryIndexFromCentralDirectory(allocator, stream, &offset);
             try members.put(entry.name, entry);
+            try stream.seekTo(offset);
         }
 
         return Self{
@@ -174,10 +183,7 @@ pub usingnamespace if (builtin.is_test)
             const allocator = testing.allocator;
             var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
             var file = archive.getFileByIndex(0).?;
-            var file_reader = try file.reader();
-            const conts = try file_reader.readAllAlloc(allocator, 10000);
-            std.debug.print("{x}", .{conts});
-            allocator.free(conts);
+            _ = try file.reader();
             archive.close();
         }
     };

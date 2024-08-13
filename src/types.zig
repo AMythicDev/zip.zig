@@ -4,6 +4,8 @@ const read = @import("read.zig");
 const ArchiveParseError = read.ArchiveParseError;
 const StreamSource = std.io.StreamSource;
 
+const Allocator = std.mem.Allocator;
+
 pub const ZipEntry = struct {
     stream: *StreamSource,
     name: []const u8,
@@ -27,7 +29,7 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(stream: *StreamSource, cd: spec.Cdfh, offset: u32) ArchiveParseError!Self {
+    pub fn fromCentralDirectoryRecord(stream: *StreamSource, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
         return ZipEntry{
             .stream = stream,
             .name = cd.name,
@@ -35,7 +37,7 @@ pub const ZipEntry = struct {
             .comment = cd.comment,
             .os = OperatingSystem.detectOS(@intCast(cd.base.made_by_ver >> 8)),
             .made_by_ver = @intCast(cd.base.made_by_ver & 0xff),
-            .extra = cd.extra,
+            .extra = lfh.extra,
             .comp_size = cd.base.comp_size,
             .uncomp_size = cd.base.uncomp_size,
             .lfh_offset = cd.base.lfh_offset,
@@ -48,13 +50,6 @@ pub const ZipEntry = struct {
     }
 
     pub fn reader(self: *Self) ArchiveParseError!std.io.LimitedReader(std.io.BufferedReader(4096, @TypeOf(self.stream.reader())).Reader).Reader {
-        try self.stream.seekTo(self.lfh_offset + spec.SIGNATURE_LENGTH);
-
-        var buff: [spec.LFH_SIZE_NOV - spec.SIGNATURE_LENGTH]u8 = undefined;
-        if (self.stream.reader().readAtLeast(&buff, spec.LFH_SIZE_NOV - spec.SIGNATURE_LENGTH) catch unreachable == 0) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
-        const base: *align(@alignOf(spec.LfhBase)) spec.LfhBase = @alignCast(std.mem.bytesAsValue(spec.LfhBase, &buff));
-        try self.stream.seekBy(base.name_len + base.extra_len);
-
         var bufreader = std.io.bufferedReader(self.stream.reader());
         const r = bufreader.reader();
         var lim_reader = std.io.limitedReader(r, self.comp_size);
