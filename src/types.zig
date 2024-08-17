@@ -49,11 +49,44 @@ pub const ZipEntry = struct {
         };
     }
 
-    pub fn reader(self: *Self) ArchiveParseError!std.io.LimitedReader(std.io.BufferedReader(4096, @TypeOf(self.stream.reader())).Reader).Reader {
+    pub fn decompressWriter(self: *Self, writer: anytype) !u32 {
+        try self.stream.seekTo(self.lfh_offset + spec.LFH_SIZE_NOV + self.name.len + self.extra.len);
+
         var bufreader = std.io.bufferedReader(self.stream.reader());
-        const r = bufreader.reader();
-        var lim_reader = std.io.limitedReader(r, self.comp_size);
-        return lim_reader.reader();
+        var lim_reader = std.io.limitedReader(bufreader.reader(), self.comp_size);
+        const reader = lim_reader.reader();
+
+        var total_uncompressed: u64 = 0;
+        var hash = std.hash.Crc32.init();
+
+        switch (self.compression) {
+            Compression.Store => {
+                var buff: [std.mem.page_size]u8 = undefined;
+                var size = try reader.read(&buff);
+                while (size != 0) {
+                    try writer.writeAll(buff[0..size]);
+                    hash.update(buff[0..size]);
+                    total_uncompressed += @intCast(size);
+                    size = try reader.read(&buff);
+                }
+            },
+            Compression.Deflate => {
+                var decompressor = std.compress.flate.decompressor(reader);
+                while (try decompressor.next()) |chunk| {
+                    try writer.writeAll(chunk);
+                    hash.update(chunk);
+                    total_uncompressed += @intCast(chunk.len);
+                    if (total_uncompressed > self.uncomp_size)
+                        return error.ZipUncompressSizeTooSmall;
+                }
+                if (bufreader.end != bufreader.start)
+                    return error.ZipDeflateTruncated;
+            },
+            // else => error.UnsupportedCompressionMethod,
+        }
+
+        if (total_uncompressed != self.uncomp_size) return error.ZipUncompressSizeMismatch;
+        return hash.final();
     }
 };
 

@@ -64,6 +64,7 @@ pub const ZipArchive = struct {
             try stream.seekTo(cd.base.lfh_offset + spec.SIGNATURE_LENGTH);
 
             const lfh = try spec.Lfh.newFromReader(allocator, stream.reader());
+
             defer allocator.free(cd.extra);
             defer allocator.free(lfh.name);
 
@@ -175,7 +176,7 @@ pub usingnamespace if (builtin.is_test)
             try testing.expect(archive.getFileByIndex(0) != null);
             try testing.expectEqual(archive.getFileByIndex(1), null);
 
-            archive.close();
+            defer archive.close();
         }
 
         test "Read uncompressed data" {
@@ -183,7 +184,11 @@ pub usingnamespace if (builtin.is_test)
             const allocator = testing.allocator;
             var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
             var file = archive.getFileByIndex(0).?;
-            _ = try file.reader();
-            archive.close();
+
+            var buffer: [1000]u8 = undefined;
+            var writer = std.io.fixedBufferStream(&buffer);
+            _ = try file.decompressWriter(writer.writer());
+
+            defer archive.close();
         }
     };
