@@ -70,7 +70,7 @@ pub const ZipArchive = struct {
 
             const entry = try ZipEntry.fromCentralDirectoryRecord(stream, cd, lfh, offset.*);
 
-            offset.* += spec.SIGNATURE_LENGTH + spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
+            offset.* += spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
             return entry;
         }
         return ArchiveParseError.NoCDHFSignatureAtOffset;
@@ -191,4 +191,6 @@ pub usingnamespace if (builtin.is_test)
 
             defer archive.close();
         }
-    };
+    }
+else
+    struct {};
