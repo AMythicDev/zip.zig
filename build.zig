@@ -15,8 +15,10 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    _ = b.addModule("zip", .{ .root_source_file = b.path("src/root.zig") });
+
     const lib = b.addStaticLibrary(.{
-        .name = "zip.zig",
+        .name = "zip",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = b.path("src/root.zig"),
