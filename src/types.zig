@@ -16,6 +16,7 @@ pub const ZipEntry = struct {
     uncomp_size: u32,
     lfh_offset: u32,
     cd_offset: u32,
+    external_attrs: u32,
     compression: Compression,
     // Level of compression for deflate to be used when writing the file.
     // 0 for normal, 1 for maximum, 2 for fast, 3 for super fast.
@@ -44,7 +45,7 @@ pub const ZipEntry = struct {
             .compression = Compression.detectCompression(cd.base.compression),
             .compression_level = null,
             .crc32 = cd.base.crc32,
-            .is_dir = cd.base.ext_attrs & IS_DIR != 0,
+            .external_attrs = cd.base.ext_attrs,
             .modtime = try DateTime.fromDos(cd.base.mod_time, cd.base.mod_date),
         };
     }
@@ -87,6 +88,27 @@ pub const ZipEntry = struct {
 
         if (total_uncompressed != self.uncomp_size) return error.ZipUncompressSizeMismatch;
         return hash.final();
+    }
+
+    inline fn unixPerms(self: Self) ?u16 {
+        const S_IFDIR = 0o0040000;
+        const S_IFREG = 0o0100000;
+
+        if (self.external_attrs == 0) return null;
+        if (self.os == .Unix) return @intCast(self.external_attrs >> 16) else if (self.os == .Dos) {
+            var mode = if (self.external_attributes & 0x10 == 0x10)
+                S_IFDIR | 0o0775
+            else
+                S_IFREG | 0o0664;
+            if (self.external_attributes & 0x01 == 0x01)
+                mode &= 0o0555;
+            return mode;
+        }
+        return null;
+    }
+
+    inline fn isDir(self: Self) bool {
+        return self.external_attrs & IS_DIR != 0;
     }
 };
 
