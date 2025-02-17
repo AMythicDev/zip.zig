@@ -191,14 +191,6 @@ pub usingnamespace if (builtin.is_test)
             archive.close();
         }
 
-        test "special test" {
-            const file = try std.fs.openFileAbsolute("/home/arijit/.zigverm/downloads/zigverm-0.6.2-x86_64-linux.zip", .{ .mode = .read_only });
-            var stream: std.io.StreamSource = .{ .file = file };
-            const allocator = testing.allocator;
-            var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
-            archive.close();
-        }
-
         test "Read uncompressed data" {
             var stream = loadZip("build.zip");
             const allocator = testing.allocator;
