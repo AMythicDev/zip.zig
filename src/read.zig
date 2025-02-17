@@ -36,19 +36,32 @@ pub const ZipArchive = struct {
 
     const Self = @This();
 
-    fn findEocd(allocator: Allocator, reader: anytype) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
+    fn findEocd(allocator: Allocator, stream: *StreamSource) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
+        var reader = @constCast(&std.io.bufferedReader(stream.reader())).reader();
         var buff: [4]u8 = undefined;
-        if (try reader.readAll(&buff) != 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+        const stream_len = try stream.getEndPos();
+        if (stream_len < 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
-        var bytes_scanned: u32 = 4;
-        var bytes_read: u32 = 4;
+        var start_range = stream_len - 32;
+        var end_range = stream_len;
+        try stream.seekTo(start_range);
+
+        var bytes_scanned: u32 = 0;
+        var bytes_read: u32 = @intCast(try reader.read(buff[0..]));
         while (bytes_read > 0) {
             if (std.mem.readInt(u32, &buff, .little) == spec.EOCD_SIGNATURE)
-                return .{ .header = try spec.Eocd.newFromReader(allocator, reader), .offset = bytes_scanned };
+                return .{ .header = try spec.Eocd.newFromReader(allocator, reader), .offset = @as(u32, @intCast(start_range)) + bytes_scanned };
 
             std.mem.copyForwards(u8, buff[0..], buff[1..]);
             bytes_scanned += bytes_read;
             bytes_read = @intCast(try reader.read(buff[3..]));
+            if (start_range + bytes_scanned + 1 == end_range) {
+                start_range = start_range - 36;
+                end_range = end_range - 32;
+                bytes_scanned = 0;
+                try stream.seekTo(start_range);
+                bytes_read = @intCast(try reader.read(buff[0..]));
+            }
         }
 
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
@@ -83,9 +96,7 @@ pub const ZipArchive = struct {
     }
 
     pub fn openFromStreamSource(allocator: Allocator, stream: *StreamSource) ArchiveParseError!Self {
-        var reader = std.io.bufferedReader(stream.reader());
-        var r = reader.reader();
-        const eocd_search = try Self.findEocd(allocator, &r);
+        const eocd_search = try Self.findEocd(allocator, stream);
         const eocd = eocd_search.header;
 
         if (eocd.base.disk_number != 0 or eocd.base.cd_start_disk != 0 or eocd.base.cd_entries_disk != eocd.base.total_cd_entries) {
@@ -172,11 +183,20 @@ pub usingnamespace if (builtin.is_test)
             var stream = loadZip("build.zip");
             const allocator = testing.allocator;
             var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
+            _ = &archive;
 
             try testing.expect(archive.getFileByIndex(0) != null);
             try testing.expectEqual(archive.getFileByIndex(1), null);
 
-            defer archive.close();
+            archive.close();
+        }
+
+        test "special test" {
+            const file = try std.fs.openFileAbsolute("/home/arijit/.zigverm/downloads/zigverm-0.6.2-x86_64-linux.zip", .{ .mode = .read_only });
+            var stream: std.io.StreamSource = .{ .file = file };
+            const allocator = testing.allocator;
+            var archive = try ZipArchive.openFromStreamSource(allocator, &stream);
+            archive.close();
         }
 
         test "Read uncompressed data" {
@@ -189,7 +209,7 @@ pub usingnamespace if (builtin.is_test)
             var writer = std.io.fixedBufferStream(&buffer);
             _ = try file.decompressWriter(writer.writer());
 
-            defer archive.close();
+            archive.close();
         }
     }
 else

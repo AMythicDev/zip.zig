@@ -31,6 +31,7 @@ pub const ZipEntry = struct {
     const IS_DIR: u32 = 1 << 4;
 
     pub fn fromCentralDirectoryRecord(stream: *StreamSource, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
+        const is_dir = cd.base.ext_attrs & IS_DIR != 0;
         return ZipEntry{
             .stream = stream,
             .name = cd.name,
@@ -47,6 +48,7 @@ pub const ZipEntry = struct {
             .crc32 = cd.base.crc32,
             .external_attrs = cd.base.ext_attrs,
             .modtime = try DateTime.fromDos(cd.base.mod_time, cd.base.mod_date),
+            .is_dir = is_dir,
         };
     }
 
@@ -105,10 +107,6 @@ pub const ZipEntry = struct {
             return mode;
         }
         return null;
-    }
-
-    inline fn isDir(self: Self) bool {
-        return self.external_attrs & IS_DIR != 0;
     }
 };
 
