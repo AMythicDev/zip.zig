@@ -2,12 +2,12 @@ const spec = @import("spec.zig");
 const std = @import("std");
 const read = @import("read.zig");
 const ArchiveParseError = read.ArchiveParseError;
-const StreamSource = std.io.StreamSource;
+const FileReader = std.fs.File.Reader;
 
 const Allocator = std.mem.Allocator;
 
 pub const ZipEntry = struct {
-    stream: *StreamSource,
+    reader: *FileReader,
     name: []const u8,
     modtime: DateTime,
     made_by_ver: u8,
@@ -30,10 +30,10 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(stream: *StreamSource, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
+    pub fn fromCentralDirectoryRecord(reader: *FileReader, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
         const is_dir = cd.base.ext_attrs & IS_DIR != 0;
         return ZipEntry{
-            .stream = stream,
+            .reader = reader,
             .name = cd.name,
             .cd_offset = offset,
             .comment = cd.comment,
@@ -53,37 +53,41 @@ pub const ZipEntry = struct {
     }
 
     pub fn decompressWriter(self: *Self, writer: anytype) !u32 {
-        try self.stream.seekTo(self.lfh_offset + spec.LFH_SIZE_NOV + self.name.len + self.extra.len);
-
-        var bufreader = std.io.bufferedReader(self.stream.reader());
-        var lim_reader = std.io.limitedReader(bufreader.reader(), self.comp_size);
-        const reader = lim_reader.reader();
+        try self.reader.seekTo(self.lfh_offset + spec.LFH_SIZE_NOV + self.name.len + self.extra.len);
 
         var total_uncompressed: u64 = 0;
         var hash = std.hash.Crc32.init();
 
         switch (self.compression) {
             Compression.Store => {
-                var buff: [std.mem.page_size]u8 = undefined;
-                var size = try reader.read(&buff);
+                var buff: [4096]u8 = undefined;
+                var size = try self.reader.interface.readSliceShort(&buff);
                 while (size != 0) {
-                    try writer.writeAll(buff[0..size]);
-                    hash.update(buff[0..size]);
-                    total_uncompressed += @intCast(size);
-                    size = try reader.read(&buff);
+                    const actsize = @min(size, self.comp_size);
+                    try writer.writeAll(buff[0..actsize]);
+                    hash.update(buff[0..actsize]);
+                    total_uncompressed += @intCast(actsize);
+                    size = try self.reader.interface.readSliceShort(&buff);
                 }
             },
             Compression.Deflate => {
-                var decompressor = std.compress.flate.decompressor(reader);
-                while (try decompressor.next()) |chunk| {
-                    try writer.writeAll(chunk);
-                    hash.update(chunk);
-                    total_uncompressed += @intCast(chunk.len);
-                    if (total_uncompressed > self.uncomp_size)
-                        return error.ZipUncompressSizeTooSmall;
+                var lreader_buf: [4096]u8 = undefined;
+                var limited = self.reader.interface.limited(.limited(self.comp_size), &lreader_buf);
+                const lreader = &limited.interface;
+
+                var dbuff: [std.compress.flate.max_window_len]u8 = undefined;
+
+                var decompressor = std.compress.flate.Decompress.init(lreader, .raw, &dbuff);
+                const reader = &decompressor.reader;
+
+                var buff: [4096]u8 = undefined;
+                var n = try reader.readSliceShort(&buff);
+                while (n != 0) {
+                    try writer.writeAll(buff[0..n]);
+                    hash.update(buff[0..n]);
+                    total_uncompressed += @intCast(n);
+                    n = try reader.readSliceShort(&buff);
                 }
-                if (bufreader.end != bufreader.start)
-                    return error.ZipDeflateTruncated;
             },
             // else => error.UnsupportedCompressionMethod,
         }

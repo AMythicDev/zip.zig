@@ -15,26 +15,24 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = b.addModule("zip", .{ .root_source_file = b.path("src/root.zig") });
-
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "zip",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.addModule("zip", .{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     b.installArtifact(lib);
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const lib_unit_tests = b.addTest(.{
+    const lib_unit_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-    });
+    }) });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 

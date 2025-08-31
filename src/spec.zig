@@ -2,6 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const ReadError = @import("read.zig").ArchiveParseError;
+const FileReader = std.fs.File.Reader;
+const assert = std.debug.assert;
 
 // Sizes for various headers
 // The _NOV suffix indicates that these sizes don't account for the variable length data like file name, comment, extra attrs inside the record .
@@ -34,13 +36,13 @@ pub const Eocd = struct {
 
     const Self = @This();
 
-    pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
+    pub fn newFromReader(allocator: Allocator, reader: *FileReader) ReadError!Self {
         var buff: [EOCD_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-        if (try reader.readAtLeast(&buff, EOCD_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeEOCDR;
-        const base: *align(@alignOf(Eocd)) EocdBase = @alignCast(std.mem.bytesAsValue(EocdBase, &buff));
+        reader.interface.readSliceAll(&buff) catch return ReadError.UnexpectedEOFBeforeEOCDR;
+        const base: *align(1) EocdBase = @alignCast(std.mem.bytesAsValue(EocdBase, &buff));
         const comment = try allocator.alloc(u8, base.comment_len);
         if (base.comment_len != 0)
-            if (try reader.readAtLeast(comment, base.comment_len) == 0) return ReadError.UnexpectedEOFBeforeEOCDR;
+            readAtleast(reader, comment, base.comment_len) catch return ReadError.UnexpectedEOFBeforeEOCDR;
 
         return Self{
             .base = base.*,
@@ -82,16 +84,16 @@ pub const Cdfh = struct {
 
     pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
         var buff: [CDHF_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-        if (try reader.readAtLeast(&buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeCDHF;
+        readAtleast(reader, &buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeCDHF;
         const base: *align(@alignOf(Cdfh)) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
 
         const name = try allocator.alloc(u8, base.name_len);
         const extra = try allocator.alloc(u8, base.extra_len);
         const comment = try allocator.alloc(u8, base.comment_len);
 
-        _ = try reader.readAtLeast(name, base.name_len);
-        _ = try reader.readAtLeast(extra, base.extra_len);
-        _ = try reader.readAtLeast(comment, base.comment_len);
+        readAtleast(reader, name, base.name_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        readAtleast(reader, extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        readAtleast(reader, comment, base.comment_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
 
         return Self{ .base = base.*, .name = name, .extra = extra, .comment = comment, .allocator = allocator };
     }
@@ -121,15 +123,15 @@ pub const Lfh = struct {
 
     pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
         var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-        if (try reader.readAtLeast(&buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) == 0) return ReadError.UnexpectedEOFBeforeLFH;
+        readAtleast(reader, &buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeLFH;
 
-        const base: *align(@alignOf(LfhBase)) LfhBase = @alignCast(std.mem.bytesAsValue(LfhBase, &buff));
+        const base: *align(1) LfhBase = @alignCast(std.mem.bytesAsValue(LfhBase, &buff));
 
         const name = try allocator.alloc(u8, base.name_len);
         const extra = try allocator.alloc(u8, base.extra_len);
 
-        _ = reader.readAtLeast(name, base.name_len) catch return ReadError.UnexpectedEOFBeforeLFH;
-        _ = reader.readAtLeast(extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeLFH;
+        readAtleast(reader, name, base.name_len) catch return ReadError.UnexpectedEOFBeforeLFH;
+        readAtleast(reader, extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeLFH;
 
         return Self{ .base = base.*, .name = name, .extra = extra, .allocator = allocator };
     }
@@ -139,3 +141,15 @@ pub const Lfh = struct {
         self.allocator.free(self.extra);
     }
 };
+
+/// Directly from Zig v0.14.1 lib/std/io/Reader.zig
+fn readAtleast(reader: *FileReader, buffer: []u8, len: u64) ReadError!void {
+    assert(len <= try reader.getSize());
+    var index: usize = 0;
+    while (index < len) {
+        const amt = try reader.read(buffer[index..]);
+        if (amt == 0) break;
+        index += amt;
+    }
+    if (index < len) return std.io.Reader.Error.EndOfStream;
+}

@@ -1,5 +1,6 @@
 .{
-    .name = "zip",
+    .name = .zip,
+    .fingerprint = 0x421d95468529c9f2,
 
     .version = "0.1.0",
 
