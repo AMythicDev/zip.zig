@@ -194,8 +194,8 @@ test "Read uncompressed data" {
     var file = archive.getFileByIndex(0).?;
 
     var buffer: [1000]u8 = undefined;
-    var writer = std.io.fixedBufferStream(&buffer);
-    _ = try file.decompressWriter(writer.writer());
+    var writer = std.Io.Writer.fixed(&buffer);
+    _ = try file.decompressWriter(&writer);
 }
 
 test "Read flate compressed data" {
@@ -206,6 +206,6 @@ test "Read flate compressed data" {
     var file = archive.getFileByIndex(0).?;
 
     var buffer: [2000]u8 = undefined;
-    var writer = std.io.fixedBufferStream(&buffer);
-    _ = try file.decompressWriter(writer.writer());
+    var writer = std.Io.Writer.fixed(&buffer);
+    _ = try file.decompressWriter(&writer);
 }

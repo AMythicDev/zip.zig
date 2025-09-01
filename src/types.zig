@@ -52,7 +52,7 @@ pub const ZipEntry = struct {
         };
     }
 
-    pub fn decompressWriter(self: *Self, writer: anytype) !u32 {
+    pub fn decompressWriter(self: *Self, writer: *std.Io.Writer) !u32 {
         try self.reader.seekTo(self.lfh_offset + spec.LFH_SIZE_NOV + self.name.len + self.extra.len);
 
         var total_uncompressed: u64 = 0;
@@ -61,6 +61,7 @@ pub const ZipEntry = struct {
         switch (self.compression) {
             Compression.Store => {
                 var buff: [4096]u8 = undefined;
+                total_uncompressed = try self.reader.interface.stream(writer, .limited(self.comp_size));
                 var size = try self.reader.interface.readSliceShort(&buff);
                 while (size != 0) {
                     const actsize = @min(size, self.comp_size);
