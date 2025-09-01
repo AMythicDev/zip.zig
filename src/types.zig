@@ -2,12 +2,12 @@ const spec = @import("spec.zig");
 const std = @import("std");
 const read = @import("read.zig");
 const ArchiveParseError = read.ArchiveParseError;
-const FileReader = std.fs.File.Reader;
+const File = std.fs.File;
 
 const Allocator = std.mem.Allocator;
 
 pub const ZipEntry = struct {
-    reader: *FileReader,
+    reader: *File.Reader,
     name: []const u8,
     modtime: DateTime,
     made_by_ver: u8,
@@ -30,7 +30,7 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(reader: *FileReader, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
+    pub fn fromCentralDirectoryRecord(reader: *File.Reader, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
         const is_dir = cd.base.ext_attrs & IS_DIR != 0;
         return ZipEntry{
             .reader = reader,

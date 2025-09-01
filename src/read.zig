@@ -10,7 +10,7 @@ const Lfh = spec.Lfh;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const FileReader = std.fs.File.Reader;
+const File = std.fs.File;
 
 const MAX_BACK_OFFSET = 100 * 1024;
 
@@ -21,12 +21,12 @@ pub const ArchiveParseError = error{
     NoCDHFSignatureAtOffset,
     DateTimeRange,
     OutOfMemory,
-} || std.fs.File.OpenError || FileReader.SeekError || FileReader.SizeError || std.io.Reader.Error;
+} || std.fs.File.OpenError || File.Reader.SeekError || File.Reader.SizeError || std.io.Reader.Error;
 
 const MemberMap = std.StringArrayHashMap(ZipEntry);
 
 pub const ZipArchive = struct {
-    stream: *FileReader,
+    stream: *File.Reader,
     member_count: u16,
     comment: []const u8,
     eocdr_offset: u32,
@@ -36,7 +36,7 @@ pub const ZipArchive = struct {
 
     const Self = @This();
 
-    fn findEocd(allocator: Allocator, reader: *FileReader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
+    fn findEocd(allocator: Allocator, reader: *File.Reader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
         var buff: [4]u8 = undefined;
         const reader_len = try reader.getSize();
         if (reader_len < 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
@@ -66,7 +66,7 @@ pub const ZipArchive = struct {
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
     }
 
-    fn entryIndexFromCentralDirectory(allocator: Allocator, reader: *FileReader, offset: *u32) ArchiveParseError!ZipEntry {
+    fn entryIndexFromCentralDirectory(allocator: Allocator, reader: *File.Reader, offset: *u32) ArchiveParseError!ZipEntry {
         var buff: [4]u8 = undefined;
         if (try reader.read(&buff) != 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
@@ -90,7 +90,7 @@ pub const ZipArchive = struct {
     pub fn openFromPath(allocator: Allocator, path: []const u8) ArchiveParseError!Self {
         var file = try std.fs.openFileAbsolute(path, .{ .mode = .read_only });
         var stream = file.seekableStream();
-        return Self.openFromFileReader(allocator, &stream);
+        return Self.openFromFile.Reader(allocator, &stream);
     }
 
     pub fn openFromFileReader(allocator: Allocator, reader: *std.fs.File.Reader) ArchiveParseError!Self {

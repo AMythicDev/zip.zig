@@ -2,7 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const ReadError = @import("read.zig").ArchiveParseError;
-const FileReader = std.fs.File.Reader;
+const File = std.fs.File;
 const assert = std.debug.assert;
 
 // Sizes for various headers
@@ -36,7 +36,7 @@ pub const Eocd = struct {
 
     const Self = @This();
 
-    pub fn newFromReader(allocator: Allocator, reader: *FileReader) ReadError!Self {
+    pub fn newFromReader(allocator: Allocator, reader: *File.Reader) ReadError!Self {
         var buff: [EOCD_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
         reader.interface.readSliceAll(&buff) catch return ReadError.UnexpectedEOFBeforeEOCDR;
         const base: *align(1) EocdBase = @alignCast(std.mem.bytesAsValue(EocdBase, &buff));
@@ -143,7 +143,7 @@ pub const Lfh = struct {
 };
 
 /// Directly from Zig v0.14.1 lib/std/io/Reader.zig
-fn readAtleast(reader: *FileReader, buffer: []u8, len: u64) ReadError!void {
+fn readAtleast(reader: *File.Reader, buffer: []u8, len: u64) ReadError!void {
     assert(len <= try reader.getSize());
     var index: usize = 0;
     while (index < len) {
