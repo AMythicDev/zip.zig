@@ -82,7 +82,7 @@ pub const Cdfh = struct {
 
     const Self = @This();
 
-    pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
+    pub fn newFromReader(allocator: Allocator, reader: File.Reader) ReadError!Self {
         var buff: [CDHF_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
         readAtleast(reader, &buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeCDHF;
         const base: *align(@alignOf(Cdfh)) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
@@ -121,7 +121,7 @@ pub const Lfh = struct {
 
     const Self = @This();
 
-    pub fn newFromReader(allocator: Allocator, reader: anytype) ReadError!Self {
+    pub fn newFromReader(allocator: Allocator, reader: File.Reader) ReadError!Self {
         var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
         readAtleast(reader, &buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeLFH;
 
