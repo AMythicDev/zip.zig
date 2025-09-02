@@ -1,10 +1,11 @@
 .{
     .name = .zip,
-    .fingerprint = 0x421d95468529c9f2,
 
-    .version = "0.1.0",
+    .fingerprint = 0x421d9546ff910179,
 
-    //.minimum_zig_version = "0.11.0",
+    .version = "0.3.0",
+
+    .minimum_zig_version = "0.15.1",
 
     .dependencies = .{},
 

@@ -52,28 +52,28 @@ pub const ZipEntry = struct {
         };
     }
 
-    pub fn decompressWriter(self: *Self, writer: *std.Io.Writer) !u32 {
-        try self.reader.seekTo(self.lfh_offset + spec.LFH_SIZE_NOV + self.name.len + self.extra.len);
+    pub fn decompressWriter(z: *ZipEntry, writer: *std.Io.Writer) !void {
+        try z.reader.seekTo(z.lfh_offset + spec.LFH_SIZE_NOV + z.name.len + z.extra.len);
 
         var total_uncompressed: u64 = 0;
         var hash = std.hash.Crc32.init();
 
-        switch (self.compression) {
+        switch (z.compression) {
             Compression.Store => {
                 var buff: [4096]u8 = undefined;
-                total_uncompressed = try self.reader.interface.stream(writer, .limited(self.comp_size));
-                var size = try self.reader.interface.readSliceShort(&buff);
+                total_uncompressed = try z.reader.interface.stream(writer, .limited(z.comp_size));
+                var size = try z.reader.interface.readSliceShort(&buff);
                 while (size != 0) {
-                    const actsize = @min(size, self.comp_size);
+                    const actsize = @min(size, z.comp_size);
                     try writer.writeAll(buff[0..actsize]);
                     hash.update(buff[0..actsize]);
                     total_uncompressed += @intCast(actsize);
-                    size = try self.reader.interface.readSliceShort(&buff);
+                    size = try z.reader.interface.readSliceShort(&buff);
                 }
             },
             Compression.Deflate => {
                 var lreader_buf: [4096]u8 = undefined;
-                var limited = self.reader.interface.limited(.limited(self.comp_size), &lreader_buf);
+                var limited = z.reader.interface.limited(.limited(z.comp_size), &lreader_buf);
                 const lreader = &limited.interface;
 
                 var dbuff: [std.compress.flate.max_window_len]u8 = undefined;
@@ -93,8 +93,8 @@ pub const ZipEntry = struct {
             // else => error.UnsupportedCompressionMethod,
         }
 
-        if (total_uncompressed != self.uncomp_size) return error.ZipUncompressSizeMismatch;
-        return hash.final();
+        if (total_uncompressed != z.uncomp_size) return error.ZipUncompressSizeMismatch;
+        if (hash.final() != z.crc32) return error.HashMismatch;
     }
 
     inline fn unixPerms(self: Self) ?u16 {
