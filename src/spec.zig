@@ -85,7 +85,8 @@ pub const Cdfh = struct {
     pub fn newFromReader(allocator: Allocator, reader: *File.Reader) ReadError!Self {
         var buff: [CDHF_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
         readAtleast(reader, &buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeCDHF;
-        const base: *align(@alignOf(Cdfh)) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
+        reader.interface.readSliceAll(&buff) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        const base: *align(1) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
 
         const name = try allocator.alloc(u8, base.name_len);
         const extra = try allocator.alloc(u8, base.extra_len);

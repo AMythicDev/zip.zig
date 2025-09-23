@@ -21,7 +21,7 @@ pub const ArchiveParseError = error{
     NoCDHFSignatureAtOffset,
     DateTimeRange,
     OutOfMemory,
-} || std.fs.File.OpenError || File.Reader.SeekError || File.Reader.SizeError || std.io.Reader.Error;
+} || std.fs.File.OpenError || File.Reader.SeekError || File.Reader.SizeError || std.Io.Reader.Error;
 
 const MemberMap = std.StringArrayHashMap(ZipEntry);
 
