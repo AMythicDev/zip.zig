@@ -42,7 +42,7 @@ pub const Eocd = struct {
         const base: *align(1) EocdBase = @alignCast(std.mem.bytesAsValue(EocdBase, &buff));
         const comment = try allocator.alloc(u8, base.comment_len);
         if (base.comment_len != 0)
-            readAtleast(reader, comment, base.comment_len) catch return ReadError.UnexpectedEOFBeforeEOCDR;
+            reader.interface.readSliceAll(comment) catch return ReadError.UnexpectedEOFBeforeEOCDR;
 
         return Self{
             .base = base.*,
@@ -84,7 +84,6 @@ pub const Cdfh = struct {
 
     pub fn newFromReader(allocator: Allocator, reader: *File.Reader) ReadError!Self {
         var buff: [CDHF_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-        readAtleast(reader, &buff, CDHF_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeCDHF;
         reader.interface.readSliceAll(&buff) catch return ReadError.UnexpectedEOFBeforeCDHF;
         const base: *align(1) CdfhBase = @alignCast(std.mem.bytesAsValue(CdfhBase, &buff));
 
@@ -92,9 +91,9 @@ pub const Cdfh = struct {
         const extra = try allocator.alloc(u8, base.extra_len);
         const comment = try allocator.alloc(u8, base.comment_len);
 
-        readAtleast(reader, name, base.name_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
-        readAtleast(reader, extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
-        readAtleast(reader, comment, base.comment_len) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        reader.interface.readSliceAll(name) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        reader.interface.readSliceAll(extra) catch return ReadError.UnexpectedEOFBeforeCDHF;
+        reader.interface.readSliceAll(comment) catch return ReadError.UnexpectedEOFBeforeCDHF;
 
         return Self{ .base = base.*, .name = name, .extra = extra, .comment = comment, .allocator = allocator };
     }
@@ -124,15 +123,15 @@ pub const Lfh = struct {
 
     pub fn newFromReader(allocator: Allocator, reader: *File.Reader) ReadError!Self {
         var buff: [LFH_SIZE_NOV - SIGNATURE_LENGTH]u8 = undefined;
-        readAtleast(reader, &buff, LFH_SIZE_NOV - SIGNATURE_LENGTH) catch return ReadError.UnexpectedEOFBeforeLFH;
+        reader.interface.readSliceAll(&buff) catch return ReadError.UnexpectedEOFBeforeLFH;
 
         const base: *align(1) LfhBase = @alignCast(std.mem.bytesAsValue(LfhBase, &buff));
 
         const name = try allocator.alloc(u8, base.name_len);
         const extra = try allocator.alloc(u8, base.extra_len);
 
-        readAtleast(reader, name, base.name_len) catch return ReadError.UnexpectedEOFBeforeLFH;
-        readAtleast(reader, extra, base.extra_len) catch return ReadError.UnexpectedEOFBeforeLFH;
+        reader.interface.readSliceAll(name) catch return ReadError.UnexpectedEOFBeforeLFH;
+        reader.interface.readSliceAll(extra) catch return ReadError.UnexpectedEOFBeforeLFH;
 
         return Self{ .base = base.*, .name = name, .extra = extra, .allocator = allocator };
     }
@@ -142,15 +141,3 @@ pub const Lfh = struct {
         self.allocator.free(self.extra);
     }
 };
-
-/// Directly from Zig v0.14.1 lib/std/io/Reader.zig
-fn readAtleast(reader: *File.Reader, buffer: []u8, len: u64) ReadError!void {
-    assert(len <= try reader.getSize());
-    var index: usize = 0;
-    while (index < len) {
-        const amt = try reader.read(buffer[index..]);
-        if (amt == 0) break;
-        index += amt;
-    }
-    if (index < len) return std.io.Reader.Error.EndOfStream;
-}
