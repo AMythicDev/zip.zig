@@ -61,14 +61,18 @@ pub const ZipEntry = struct {
         switch (z.compression) {
             Compression.Store => {
                 var buff: [4096]u8 = undefined;
-                total_uncompressed = try z.reader.interface.stream(writer, .limited(z.comp_size));
-                var size = try z.reader.interface.readSliceShort(&buff);
+
+                var lreader_buf: [4096]u8 = undefined;
+                var limited = z.reader.interface.limited(.limited(z.comp_size), &lreader_buf);
+                const lreader = &limited.interface;
+
+                var size = try lreader.readSliceShort(&buff);
+
                 while (size != 0) {
-                    const actsize = @min(size, z.comp_size);
-                    try writer.writeAll(buff[0..actsize]);
-                    hash.update(buff[0..actsize]);
-                    total_uncompressed += @intCast(actsize);
-                    size = try z.reader.interface.readSliceShort(&buff);
+                    try writer.writeAll(buff[0..size]);
+                    hash.update(buff[0..size]);
+                    total_uncompressed += @intCast(size);
+                    size = try lreader.readSliceShort(&buff);
                 }
             },
             Compression.Deflate => {
