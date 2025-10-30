@@ -168,17 +168,18 @@ test "Parse EOCD" {
     try testing.expect(archive.member_count != 0);
 }
 
-pub fn loadZip(comptime path: []const u8) std.fs.File.OpenError!std.fs.File.Reader {
+pub fn loadZip(alloc: Allocator, comptime path: []const u8) !std.fs.File.Reader {
     const dir = std.fs.cwd();
     const file = try dir.openFile(path, .{ .mode = .read_only });
-    var buf: [4096]u8 = undefined;
-    const r = std.fs.File.Reader.init(file, &buf);
+    const buf = try alloc.alloc(u8, 4096);
+    const r = std.fs.File.Reader.init(file, buf);
     return r;
 }
 
 test "Parse CDFH" {
-    var r = try loadZip("build.zip");
     const allocator = testing.allocator;
+    var r = try loadZip(allocator, "build.zip");
+    defer allocator.free(r.interface.buffer);
     var archive = try ZipArchive.openFromFileReader(allocator, &r);
 
     try testing.expect(archive.getFileByIndex(0) != null);
@@ -188,8 +189,9 @@ test "Parse CDFH" {
 }
 
 test "Read uncompressed data" {
-    var r = try loadZip("build.zip");
     const allocator = testing.allocator;
+    var r = try loadZip(allocator, "build.zip");
+    defer allocator.free(r.interface.buffer);
     var archive = try ZipArchive.openFromFileReader(allocator, &r);
     defer archive.close();
     var file = archive.getFileByIndex(0).?;
@@ -200,8 +202,9 @@ test "Read uncompressed data" {
 }
 
 test "Read flate compressed data" {
-    var r = try loadZip("readme.zip");
     const allocator = testing.allocator;
+    var r = try loadZip(allocator, "readme.zip");
+    defer allocator.free(r.interface.buffer);
     var archive = try ZipArchive.openFromFileReader(allocator, &r);
     defer archive.close();
     var file = archive.getFileByIndex(0).?;

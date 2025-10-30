@@ -3,7 +3,7 @@
 
     .fingerprint = 0x421d9546ff910179,
 
-    .version = "0.3.1",
+    .version = "0.3.3",
 
     .minimum_zig_version = "0.15.1",
 
