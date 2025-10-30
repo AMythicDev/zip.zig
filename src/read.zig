@@ -36,50 +36,51 @@ pub const ZipArchive = struct {
 
     const Self = @This();
 
-    fn findEocd(allocator: Allocator, reader: *File.Reader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
+    fn findEocd(allocator: Allocator, freader: *File.Reader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
         var buff: [4]u8 = undefined;
-        const reader_len = try reader.getSize();
+        const reader_len = try freader.getSize();
         if (reader_len < 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
         var start_range = reader_len - 32;
         var end_range = reader_len;
-        try reader.seekTo(start_range);
+        try freader.seekTo(start_range);
 
-        var bytes_scanned: u32 = 0;
-        var bytes_read: u32 = @intCast(try reader.read(buff[0..]));
-        while (bytes_read > 0) {
+        const reader = &freader.interface;
+
+        var bytes_scanned: u32 = @intCast(try reader.readSliceShort(buff[0..]));
+        while (true) {
             if (std.mem.readInt(u32, &buff, .little) == spec.EOCD_SIGNATURE)
-                return .{ .header = try spec.Eocd.newFromReader(allocator, reader), .offset = @as(u32, @intCast(start_range)) + bytes_scanned };
+                return .{ .header = try spec.Eocd.newFromReader(allocator, freader), .offset = @as(u32, @intCast(start_range)) + bytes_scanned };
 
             @memmove(buff[0..3], buff[1..]);
-            bytes_scanned += bytes_read;
-            bytes_read = @intCast(try reader.read(buff[3..]));
+            try reader.readSliceAll(buff[3..]);
+            bytes_scanned += 1;
             if (start_range + bytes_scanned + 1 == end_range) {
                 start_range = start_range - 36;
                 end_range = end_range - 32;
-                bytes_scanned = 0;
-                try reader.seekTo(start_range);
-                bytes_read = @intCast(try reader.read(buff[0..]));
+                try freader.seekTo(start_range);
+                bytes_scanned = @intCast(try reader.readSliceShort(buff[0..]));
             }
         }
 
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
     }
 
-    fn entryIndexFromCentralDirectory(allocator: Allocator, reader: *File.Reader, offset: *u32) ArchiveParseError!ZipEntry {
+    fn entryIndexFromCentralDirectory(allocator: Allocator, freader: *File.Reader, offset: *u32) ArchiveParseError!ZipEntry {
         var buff: [4]u8 = undefined;
-        if (try reader.read(&buff) != 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+        const reader = &freader.interface;
+        reader.readSliceAll(&buff) catch return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
         if (std.mem.readInt(u32, &buff, .little) == spec.CDFH_SIGNATURE) {
-            const cd = try spec.Cdfh.newFromReader(allocator, reader);
-            try reader.seekTo(cd.base.lfh_offset + spec.SIGNATURE_LENGTH);
+            const cd = try spec.Cdfh.newFromReader(allocator, freader);
+            try freader.seekTo(cd.base.lfh_offset + spec.SIGNATURE_LENGTH);
 
-            const lfh = try spec.Lfh.newFromReader(allocator, reader);
+            const lfh = try spec.Lfh.newFromReader(allocator, freader);
 
             defer allocator.free(cd.extra);
             defer allocator.free(lfh.name);
 
-            const entry = try ZipEntry.fromCentralDirectoryRecord(reader, cd, lfh, offset.*);
+            const entry = try ZipEntry.fromCentralDirectoryRecord(freader, cd, lfh, offset.*);
 
             offset.* += spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
             return entry;
