@@ -74,6 +74,7 @@ pub const ZipEntry = struct {
                     total_uncompressed += @intCast(size);
                     size = try lreader.readSliceShort(&buff);
                 }
+                try writer.flush();
             },
             Compression.Deflate => {
                 var lreader_buf: [4096]u8 = undefined;
@@ -93,6 +94,7 @@ pub const ZipEntry = struct {
                     total_uncompressed += @intCast(n);
                     n = try reader.readSliceShort(&buff);
                 }
+                try writer.flush();
             },
             // else => error.UnsupportedCompressionMethod,
         }
