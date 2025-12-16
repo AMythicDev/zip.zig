@@ -159,8 +159,10 @@ fn headerSearchResult(comptime T: type, comptime U: type) type {
 test "Parse EOCD" {
     const dir = std.fs.cwd();
     const file = try dir.openFile("build.zip", .{ .mode = .read_only });
+    var single_thread = std.Io.Threaded.init_single_threaded;
+    const io = single_thread.io();
     var buf: [4096]u8 = undefined;
-    var r = std.fs.File.Reader.init(file, &buf);
+    var r = file.reader(io, &buf);
     const allocator = testing.allocator;
     var archive = try ZipArchive.openFromFileReader(allocator, &r);
     defer archive.close();
@@ -172,7 +174,10 @@ pub fn loadZip(alloc: Allocator, comptime path: []const u8) !std.fs.File.Reader 
     const dir = std.fs.cwd();
     const file = try dir.openFile(path, .{ .mode = .read_only });
     const buf = try alloc.alloc(u8, 4096);
-    const r = std.fs.File.Reader.init(file, buf);
+
+    var single_thread = std.Io.Threaded.init_single_threaded;
+    const io = single_thread.io();
+    const r = file.reader(io, buf);
     return r;
 }
 
