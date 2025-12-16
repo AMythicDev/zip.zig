@@ -1,5 +1,6 @@
 const spec = @import("spec.zig");
 const std = @import("std");
+const builtin = @import("builtin");
 const read = @import("read.zig");
 const ArchiveParseError = read.ArchiveParseError;
 const File = std.fs.File;
@@ -52,7 +53,7 @@ pub const ZipEntry = struct {
         };
     }
 
-    pub fn decompressWriter(z: *ZipEntry, writer: *std.Io.Writer) !void {
+    pub fn decompressWriter(z: *const ZipEntry, writer: *std.Io.Writer) !void {
         try z.reader.seekTo(z.lfh_offset + spec.LFH_SIZE_NOV + z.name.len + z.extra.len);
 
         var total_uncompressed: u64 = 0;
@@ -101,6 +102,20 @@ pub const ZipEntry = struct {
 
         if (total_uncompressed != z.uncomp_size) return error.ZipUncompressSizeMismatch;
         if (hash.final() != z.crc32) return error.HashMismatch;
+    }
+
+    pub fn decompressToFile(self: *const ZipEntry, file: std.fs.File) !void {
+        var writer = file.writer();
+        try self.decompressWriter(&writer);
+
+        if (self.unixPerms()) |perms| {
+            if (builtin.os.tag != .windows) {
+                try file.chmod(perms);
+            }
+        }
+
+        const nanos = self.modtime.toNanoTimestamp();
+        try file.updateTimes(nanos, nanos);
     }
 
     inline fn unixPerms(self: Self) ?u16 {
@@ -174,6 +189,28 @@ pub const DateTime = struct {
 
     fn isLeapYear(year: u16) bool {
         return ((year % 4 == 0) and ((year % 25 != 0) or (year % 16 == 0)));
+    }
+
+    pub fn toNanoTimestamp(self: DateTime) i128 {
+        var days: u64 = 0;
+        var y: u16 = 1970;
+        while (y < self.year) : (y += 1) {
+            days += if (DateTime.isLeapYear(y)) 366 else 365;
+        }
+
+        const month_days = [_]u16{ 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+        var m: u8 = 1;
+        while (m < self.month) : (m += 1) {
+            days += month_days[m];
+            if (m == 2 and DateTime.isLeapYear(self.year)) {
+                days += 1;
+            }
+        }
+
+        days += (self.day - 1);
+
+        const seconds = days * 86400 + @as(u64, self.hour) * 3600 + @as(u64, self.minute) * 60 + self.second;
+        return @as(i128, seconds) * 1_000_000_000;
     }
 };
 
