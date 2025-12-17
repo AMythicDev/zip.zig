@@ -16,6 +16,7 @@ pub const EOCD_SIGNATURE = 0x06054b50;
 pub const CDFH_SIGNATURE = 0x02014b50;
 pub const LFH_SIGNATURE = 0x04034b50;
 pub const SIGNATURE_LENGTH = 4;
+pub const MAX_COMMENT_SIZE = 65535;
 
 pub const EocdBase = packed struct {
     disk_number: u16,

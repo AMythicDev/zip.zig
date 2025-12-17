@@ -37,30 +37,58 @@ pub const ZipArchive = struct {
     const Self = @This();
 
     fn findEocd(allocator: Allocator, freader: *File.Reader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
-        var buff: [4]u8 = undefined;
-        const reader_len = try freader.getSize();
-        if (reader_len < 4) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+        const file_len = try freader.getSize();
+        if (file_len < spec.EOCD_SIZE_NOV) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
-        var start_range = reader_len - 32;
-        var end_range = reader_len;
-        try freader.seekTo(start_range);
+        const search_limit = spec.MAX_COMMENT_SIZE + spec.EOCD_SIZE_NOV;
+        const stop_offset = if (file_len > search_limit) file_len - search_limit else 0;
 
-        const reader = &freader.interface;
+        const buflen = 4096;
+        var buf: [buflen]u8 = [_]u8{0} ** buflen;
 
-        var bytes_scanned: u32 = @intCast(try reader.readSliceShort(buff[0..]));
-        while (true) {
-            if (std.mem.readInt(u32, &buff, .little) == spec.EOCD_SIGNATURE)
-                return .{ .header = try spec.Eocd.newFromReader(allocator, freader), .offset = @as(u32, @intCast(start_range)) + bytes_scanned };
+        var window_end = file_len;
 
-            @memmove(buff[0..3], buff[1..]);
-            try reader.readSliceAll(buff[3..]);
-            bytes_scanned += 1;
-            if (start_range + bytes_scanned + 1 == end_range) {
-                start_range = start_range - 36;
-                end_range = end_range - 32;
-                try freader.seekTo(start_range);
-                bytes_scanned = @intCast(try reader.readSliceShort(buff[0..]));
+        const VecLen = 32;
+        const V = @Vector(VecLen, u8);
+        const sig_first_byte: u8 = @intCast(spec.EOCD_SIGNATURE & 0xFF);
+        const sig_first: V = @splat(sig_first_byte);
+
+        while (window_end > stop_offset) {
+            var window_start: u64 = 0;
+            if (window_end > buflen) window_start = window_end - buflen;
+            if (window_start < stop_offset) window_start = stop_offset;
+
+            const n = window_end - window_start;
+            try freader.seekTo(window_start);
+            try freader.interface.readSliceAll(buf[0..n]);
+
+            var i: usize = n;
+            while (i > 0) {
+                if (i >= VecLen) i -= VecLen else i = 0;
+
+                const chunk: V = buf[i..][0..VecLen].*;
+                const matches = chunk == sig_first;
+
+                if (@reduce(.Or, matches)) {
+                    const matches_arr: [VecLen]bool = matches;
+                    var k: usize = VecLen;
+                    while (k > 0) {
+                        k -= 1;
+                        if (matches_arr[k]) {
+                            const off = i + k;
+                            const sig = std.mem.readInt(u32, buf[off..][0..4], .little);
+                            if (sig == spec.EOCD_SIGNATURE) {
+                                const abs_offset = window_start + off;
+                                try freader.seekTo(abs_offset + 4);
+                                return .{ .header = try spec.Eocd.newFromReader(allocator, freader), .offset = @intCast(abs_offset) };
+                            }
+                        }
+                    }
+                }
             }
+
+            if (window_start <= stop_offset) break;
+            window_end = window_start + 3;
         }
 
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
