@@ -28,11 +28,13 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
+    const zbench = b.dependency("zbench", .{ .target = target, .optimize = optimize }).module("zbench");
     const lib_unit_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     }) });
+    lib_unit_tests.root_module.addImport("zbench", zbench);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 

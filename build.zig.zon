@@ -7,7 +7,12 @@
 
     .minimum_zig_version = "0.15.1",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .zbench = .{
+            .url = "git+https://github.com/hendriknielaender/zBench.git#3268a23da82231f1bd2c064de7fdf6fb7056126f",
+            .hash = "zbench-0.11.2-YTdc7zolAQDlBF9i0ywXIvDjafL3Kg27S-aFUq6dU5zy",
+        },
+    },
 
     .paths = .{
         "build.zig",
