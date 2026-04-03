@@ -2,7 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const ReadError = @import("read.zig").ArchiveParseError;
-const File = std.fs.File;
+const File = std.Io.File;
 const assert = std.debug.assert;
 
 // Sizes for various headers

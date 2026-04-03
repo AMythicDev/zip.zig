@@ -3,7 +3,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const read = @import("read.zig");
 const ArchiveParseError = read.ArchiveParseError;
-const File = std.fs.File;
+const File = std.Io.File;
 
 const Allocator = std.mem.Allocator;
 

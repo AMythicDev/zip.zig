@@ -10,7 +10,7 @@ const Lfh = spec.Lfh;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const File = std.fs.File;
+const File = std.Io.File;
 
 const MAX_BACK_OFFSET = 100 * 1024;
 
@@ -21,7 +21,7 @@ pub const ArchiveParseError = error{
     NoCDHFSignatureAtOffset,
     DateTimeRange,
     OutOfMemory,
-} || std.fs.File.OpenError || File.Reader.SeekError || File.Reader.SizeError || std.Io.Reader.Error;
+} || File.OpenError || File.Reader.SeekError || File.Reader.SizeError || std.Io.Reader.Error;
 
 const MemberMap = std.StringArrayHashMap(ZipEntry);
 
@@ -116,13 +116,13 @@ pub const ZipArchive = struct {
         return ArchiveParseError.NoCDHFSignatureAtOffset;
     }
 
-    pub fn openFromPath(allocator: Allocator, path: []const u8) ArchiveParseError!Self {
-        var file = try std.fs.openFileAbsolute(path, .{ .mode = .read_only });
+    pub fn openFromPath(allocator: Allocator, io: std.Io, path: []const u8) ArchiveParseError!Self {
+        var file = try io.openFileAbsolute(path, .{ .mode = .read_only });
         var stream = file.seekableStream();
         return Self.openFromFile.Reader(allocator, &stream);
     }
 
-    pub fn openFromFileReader(allocator: Allocator, reader: *std.fs.File.Reader) ArchiveParseError!Self {
+    pub fn openFromFileReader(allocator: Allocator, reader: *std.Io.File.Reader) ArchiveParseError!Self {
         const eocd_search = try Self.findEocd(allocator, reader);
         const eocd = eocd_search.header;
 
@@ -185,10 +185,11 @@ fn headerSearchResult(comptime T: type, comptime U: type) type {
 }
 
 test "Parse EOCD" {
-    const dir = std.fs.cwd();
-    const file = try dir.openFile("build.zip", .{ .mode = .read_only });
     var single_thread = std.Io.Threaded.init_single_threaded;
     const io = single_thread.io();
+
+    const dir = std.Io.Dir.cwd();
+    const file = try dir.openFile(io, "build.zip", .{ .mode = .read_only });
     var buf: [4096]u8 = undefined;
     var r = file.reader(io, &buf);
     const allocator = testing.allocator;
@@ -198,13 +199,14 @@ test "Parse EOCD" {
     try testing.expect(archive.member_count != 0);
 }
 
-pub fn loadZip(alloc: Allocator, comptime path: []const u8) !std.fs.File.Reader {
-    const dir = std.fs.cwd();
-    const file = try dir.openFile(path, .{ .mode = .read_only });
-    const buf = try alloc.alloc(u8, 4096);
-
+pub fn loadZip(alloc: Allocator, comptime path: []const u8) !std.Io.File.Reader {
     var single_thread = std.Io.Threaded.init_single_threaded;
     const io = single_thread.io();
+
+    const dir = std.Io.Dir.cwd();
+    const file = try dir.openFile(io, path, .{ .mode = .read_only });
+    const buf = try alloc.alloc(u8, 4096);
+
     const r = file.reader(io, buf);
     return r;
 }
