@@ -94,21 +94,41 @@ pub const ZipArchive = struct {
         return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
     }
 
-    fn entryIndexFromCentralDirectory(allocator: Allocator, freader: *File.Reader, offset: *u32) ArchiveParseError!ZipEntry {
+    fn entryIndexFromCentralDirectory(allocator: Allocator, freader: *File.Reader, offset: *u32, file_len: u64, base_offset: u64) ArchiveParseError!ZipEntry {
         var buff: [4]u8 = undefined;
         const reader = &freader.interface;
-        reader.readSliceAll(&buff) catch return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+        reader.readSliceAll(&buff) catch return ArchiveParseError.UnexpectedEOFBeforeCDHF;
 
         if (std.mem.readInt(u32, &buff, .little) == spec.CDFH_SIGNATURE) {
             const cd = try spec.Cdfh.newFromReader(allocator, freader);
-            try freader.seekTo(cd.base.lfh_offset + spec.SIGNATURE_LENGTH);
+            var lfh_offset: u32 = cd.base.lfh_offset;
+            if (base_offset != 0 and cd.base.lfh_offset >= base_offset) {
+                const adjusted = cd.base.lfh_offset - base_offset;
+                if (adjusted <= std.math.maxInt(u32)) lfh_offset = @intCast(adjusted);
+            }
 
-            const lfh = try spec.Lfh.newFromReader(allocator, freader);
+            var lfh_extra = cd.extra;
+            var lfh_name: []const u8 = &.{};
+            var lfh_loaded = false;
 
-            defer allocator.free(cd.extra);
-            defer allocator.free(lfh.name);
+            if (@as(u64, lfh_offset) + spec.SIGNATURE_LENGTH <= file_len) {
+                try freader.seekTo(lfh_offset);
+                var sig: [4]u8 = undefined;
+                if (reader.readSliceAll(&sig)) |_| {
+                    if (std.mem.readInt(u32, &sig, .little) == spec.LFH_SIGNATURE) {
+                        if (spec.Lfh.newFromReader(allocator, freader)) |lfh| {
+                            lfh_loaded = true;
+                            lfh_extra = lfh.extra;
+                            lfh_name = lfh.name;
+                        } else |_| {}
+                    }
+                } else |_| {}
+            }
 
-            const entry = try ZipEntry.fromCentralDirectoryRecord(freader, cd, lfh, offset.*);
+            defer if (lfh_loaded) allocator.free(cd.extra);
+            defer if (lfh_loaded) allocator.free(lfh_name);
+
+            const entry = try ZipEntry.fromCentralDirectoryRecord(freader, cd, lfh_extra, lfh_offset, offset.*);
 
             offset.* += spec.CDHF_SIZE_NOV + cd.base.name_len + cd.base.extra_len + cd.base.comment_len;
             return entry;
@@ -130,11 +150,24 @@ pub const ZipArchive = struct {
             @panic("Multi volume arcives not supported for now");
         }
 
-        try reader.seekTo(eocd.base.cd_offset);
-        var offset = eocd.base.cd_offset;
+        const file_len = try reader.getSize();
+        const eocd_len = spec.EOCD_SIZE_NOV + eocd.base.comment_len;
+        var cd_offset = eocd.base.cd_offset;
+        var base_offset: u64 = 0;
+        const cd_end = @as(u64, cd_offset) + eocd.base.cd_size;
+        if (cd_end > file_len) {
+            if (eocd.base.cd_size + eocd_len > file_len) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+            const fallback = file_len - (eocd.base.cd_size + eocd_len);
+            if (fallback > std.math.maxInt(u32)) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
+            cd_offset = @intCast(fallback);
+            if (eocd.base.cd_offset > cd_offset) base_offset = eocd.base.cd_offset - cd_offset;
+        }
+
+        try reader.seekTo(cd_offset);
+        var offset = cd_offset;
         var members = MemberMap.init(allocator);
         for (0..eocd.base.total_cd_entries) |_| {
-            const entry = try entryIndexFromCentralDirectory(allocator, reader, &offset);
+            const entry = try entryIndexFromCentralDirectory(allocator, reader, &offset, file_len, base_offset);
             try members.put(entry.name, entry);
             try reader.seekTo(offset);
         }
@@ -143,7 +176,7 @@ pub const ZipArchive = struct {
             .stream = reader,
             .member_count = eocd.base.total_cd_entries,
             .comment = eocd.comment,
-            .cd_offset = eocd.base.cd_offset,
+            .cd_offset = cd_offset,
             .eocdr_offset = eocd_search.offset,
             .allocator = allocator,
             .members = members,

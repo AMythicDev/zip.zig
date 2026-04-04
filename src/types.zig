@@ -31,7 +31,7 @@ pub const ZipEntry = struct {
 
     const IS_DIR: u32 = 1 << 4;
 
-    pub fn fromCentralDirectoryRecord(reader: *File.Reader, cd: spec.Cdfh, lfh: spec.Lfh, offset: u32) ArchiveParseError!Self {
+    pub fn fromCentralDirectoryRecord(reader: *File.Reader, cd: spec.Cdfh, lfh_extra: []const u8, lfh_offset: u32, offset: u32) ArchiveParseError!Self {
         const is_dir = cd.base.ext_attrs & IS_DIR != 0;
         return ZipEntry{
             .reader = reader,
@@ -40,10 +40,10 @@ pub const ZipEntry = struct {
             .comment = cd.comment,
             .os = OperatingSystem.detectOS(@intCast(cd.base.made_by_ver >> 8)),
             .made_by_ver = @intCast(cd.base.made_by_ver & 0xff),
-            .extra = lfh.extra,
+            .extra = lfh_extra,
             .comp_size = cd.base.comp_size,
             .uncomp_size = cd.base.uncomp_size,
-            .lfh_offset = cd.base.lfh_offset,
+            .lfh_offset = lfh_offset,
             .compression = Compression.detectCompression(cd.base.compression),
             .compression_level = null,
             .crc32 = cd.base.crc32,
@@ -149,7 +149,7 @@ pub const DateTime = struct {
         const minute = (dos_time >> 5) & 0x3f;
         const hour = (dos_time >> 11);
         const day = (dos_date & 0x1f);
-        const month = ((dos_date >> 5) & 0xf) - 1;
+        const month = ((dos_date >> 5) & 0xf);
         const year = (dos_date >> 9) + 1980;
 
         if (DateTime.checkValidDateTime(second, minute, hour, day, month, year)) {
@@ -158,7 +158,7 @@ pub const DateTime = struct {
             return DateTime{
                 .second = @intCast(second),
                 .minute = @intCast(minute),
-                .hour = @intCast(day),
+                .hour = @intCast(hour),
                 .day = @intCast(day),
                 .month = @intCast(month),
                 .year = @intCast(year),
@@ -169,7 +169,7 @@ pub const DateTime = struct {
     }
 
     fn checkValidDateTime(second: u16, minute: u16, hour: u16, day: u16, month: u16, year: u16) bool {
-        if (1980 <= year and year <= 2107 and 1 <= month and month <= 12 and 1 <= day and day <= 31 and 1 <= hour and hour <= 23 and minute <= 59 and second <= 60) {
+        if (1980 <= year and year <= 2107 and 1 <= month and month <= 12 and 1 <= day and day <= 31 and hour <= 23 and minute <= 59 and second <= 60) {
             const max_days: u8 = switch (month) {
                 2 => b: {
                     break :b if (DateTime.isLeapYear(year)) @as(u8, 29) else @as(u8, 28);
