@@ -37,7 +37,7 @@ pub const ZipArchive = struct {
     const Self = @This();
 
     fn findEocd(allocator: Allocator, freader: *File.Reader) ArchiveParseError!headerSearchResult(spec.Eocd, u32) {
-        const file_len = try freader.getSize();
+        const file_len: usize = @intCast(try freader.getSize());
         if (file_len < spec.EOCD_SIZE_NOV) return ArchiveParseError.UnexpectedEOFBeforeEOCDR;
 
         const search_limit = spec.MAX_COMMENT_SIZE + spec.EOCD_SIZE_NOV;
@@ -46,7 +46,7 @@ pub const ZipArchive = struct {
         const buflen = 4096;
         var buf: [buflen]u8 = [_]u8{0} ** buflen;
 
-        var window_end = file_len;
+        var window_end: usize = file_len;
 
         const VecLen = 32;
         const V = @Vector(VecLen, u8);
@@ -54,7 +54,7 @@ pub const ZipArchive = struct {
         const sig_first: V = @splat(sig_first_byte);
 
         while (window_end > stop_offset) {
-            var window_start: u64 = 0;
+            var window_start: usize = 0;
             if (window_end > buflen) window_start = window_end - buflen;
             if (window_start < stop_offset) window_start = stop_offset;
 
